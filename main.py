@@ -1,30 +1,33 @@
+import os
+import json
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
-import json
-import os
 
 app = FastAPI()
 
 # -------------------------
-#   CORS (permite acceso desde Android o cualquier origen)
+#   CORS (permite acceso desde Android)
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Puedes poner tu dominio de Render en producción
+    allow_origins=["*"],  # Permite cualquier origen
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -------------------------
-#   CONEXIÓN A POSTGIS (Render usa DATABASE_URL)
+#   CONEXIÓN A POSTGIS (Render: variables de entorno)
 # -------------------------
-DATABASE_URL = os.getenv("postgresql://escom_user:XIpslvyaC6NdCcmd0BLTWsY7KLP1SXDs@dpg-d4tf32f5r7bs73ba7kj0-a.oregon-postgres.render.com/escom")
-if not DATABASE_URL:
-    raise Exception("Variable de entorno DATABASE_URL no encontrada")
-
-conn = psycopg2.connect(DATABASE_URL, sslmode="require")
+conn = psycopg2.connect(
+    host=os.environ["PGHOST"],
+    database=os.environ["PGDATABASE"],
+    user=os.environ["PGUSER"],
+    password=os.environ["PGPASSWORD"],
+    port=os.environ["PGPORT"],
+    sslmode=os.environ.get("PGSSLMODE", "require")
+)
 
 # -------------------------
 #   FUNCIÓN PARA GENERAR GEOJSON
@@ -58,7 +61,6 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
             "geometry": json.loads(geom)
         })
 
-    cur.close()
     return {"type": "FeatureCollection", "features": features}
 
 # -------------------------
@@ -91,7 +93,6 @@ def obtener_tipos():
         ORDER BY tipo;
     """)
     tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
-    cur.close()
     return {"tipos": tipos}
 
 # -------------------------
@@ -100,5 +101,7 @@ def obtener_tipos():
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
+
 
 
