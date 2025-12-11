@@ -1,14 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
-from psycopg2.extras import RealDictCursor
 import json
 import os
 
 app = FastAPI()
 
 # -------------------------
-# CORS (permite acceso desde Android)
+#   CORS (permite acceso desde Android/web)
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -19,31 +18,25 @@ app.add_middleware(
 )
 
 # -------------------------
-# CONEXIÓN A POSTGIS
+#   FUNCIÓN PARA OBTENER CONEXIÓN
 # -------------------------
 def get_conn():
-    """
-    Crea una conexión a la base de datos cada vez que se necesita.
-    Esto evita problemas de timeout o cierre inesperado de la conexión.
-    """
     return psycopg2.connect(
         host=os.getenv("PGHOST"),
         database=os.getenv("PGDATABASE"),
         user=os.getenv("PGUSER"),
         password=os.getenv("PGPASSWORD"),
-        port=os.getenv("PGPORT", 5432),
-        sslmode="prefer",  # cambiar a "require" si tienes certificado
-        cursor_factory=RealDictCursor
+        port=os.getenv("PGPORT"),
+        sslmode=os.getenv("PGSSLMODE", "require")  # Usar variable de entorno PGSSLMODE
     )
 
 # -------------------------
-# FUNCIÓN PARA GENERAR GEOJSON
+#   FUNCIÓN PARA GENERAR GEOJSON
 # -------------------------
 def construir_geojson(nombre_tabla: str, tipo: str = None):
     conn = get_conn()
     cur = conn.cursor()
 
-    # SQL según si viene filtro
     if tipo:
         cur.execute(f"""
             SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
@@ -57,25 +50,26 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
         """)
 
     features = []
-    for row in cur.fetchall():
+    for ogc_fid, sid, codigo, tipo, nivel, geom in cur.fetchall():
         features.append({
             "type": "Feature",
             "properties": {
-                "ogc_fid": row["ogc_fid"],
-                "id": row["id"],
-                "codigo": row["codigo"],
-                "tipo": row["tipo"],
-                "nivel": row["nivel"]
+                "ogc_fid": ogc_fid,
+                "id": sid,
+                "codigo": codigo,
+                "tipo": tipo,
+                "nivel": nivel
             },
-            "geometry": json.loads(row["st_asgeojson"])
+            "geometry": json.loads(geom)
         })
 
     cur.close()
     conn.close()
+
     return {"type": "FeatureCollection", "features": features}
 
 # -------------------------
-# ENDPOINTS POR NIVEL
+#   ENDPOINTS POR NIVEL
 # -------------------------
 @app.get("/Nivel1")
 def nivel1(tipo: str = None):
@@ -90,12 +84,13 @@ def nivel3(tipo: str = None):
     return construir_geojson("nivel3", tipo)
 
 # -------------------------
-# ENDPOINT PARA LISTA DE TIPOS
+#   ENDPOINT PARA LISTA DE TIPOS
 # -------------------------
 @app.get("/Tipos")
 def obtener_tipos():
     conn = get_conn()
     cur = conn.cursor()
+
     cur.execute("""
         SELECT DISTINCT tipo FROM nivel1
         UNION
@@ -104,17 +99,22 @@ def obtener_tipos():
         SELECT DISTINCT tipo FROM nivel3
         ORDER BY tipo;
     """)
-    tipos = [row["tipo"] for row in cur.fetchall() if row["tipo"] is not None]
+
+    tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
+
     cur.close()
     conn.close()
+
     return {"tipos": tipos}
 
 # -------------------------
-# ENDPOINT OPCIONAL: LISTA DE NIVELES DISPONIBLES
+#   ENDPOINT OPCIONAL: LISTA DE NIVELES DISPONIBLES
 # -------------------------
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
+
 
 
 
