@@ -1,16 +1,15 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-import psycopg2
-from psycopg2.extras import RealDictCursor
-from psycopg2 import pool
 import os
 import json
-import traceback
+import psycopg2
+from psycopg2 import pool
+from psycopg2.extras import RealDictCursor
 
 app = FastAPI()
 
 # -------------------------
-#   CORS (permite acceso desde cualquier origen)
+#   CORS (permite acceso desde Android o web)
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
@@ -21,56 +20,45 @@ app.add_middleware(
 )
 
 # -------------------------
-#   CONEXIÓN A POSTGRES CON POOL
+#   POOL DE CONEXIONES A POSTGRES EN RENDER
 # -------------------------
 try:
-    db_pool = psycopg2.pool.SimpleConnectionPool(
+    db_pool = pool.SimpleConnectionPool(
         1, 20,  # min y max conexiones
         host=os.getenv("PGHOST"),
         database=os.getenv("PGDATABASE"),
         user=os.getenv("PGUSER"),
         password=os.getenv("PGPASSWORD"),
-        port=os.getenv("PGPORT", 5432),
-        sslmode="require",  # obligatorio en Render
+        port=os.getenv("PGPORT"),
+        sslmode=os.getenv("PGSSLMODE", "require"),
         cursor_factory=RealDictCursor
     )
     if db_pool:
         print("Pool de conexiones creado exitosamente")
 except Exception as e:
-    print("Error creando pool de conexiones:")
-    print(traceback.format_exc())
+    print(f"Error creando pool de conexiones: {e}")
     raise
 
 # -------------------------
-#   FUNCIÓN PARA OBTENER CONEXIÓN DEL POOL
+#   FUNCIONES AUXILIARES
 # -------------------------
 def get_conn():
     try:
         return db_pool.getconn()
     except Exception as e:
-        print("Error obteniendo conexión del pool:")
-        print(traceback.format_exc())
-        raise
+        raise HTTPException(status_code=500, detail=f"Error de conexión a la base de datos: {e}")
 
-# -------------------------
-#   FUNCIÓN PARA LIBERAR CONEXIÓN
-# -------------------------
 def release_conn(conn):
-    try:
+    if conn:
         db_pool.putconn(conn)
-    except Exception as e:
-        print("Error liberando conexión:")
-        print(traceback.format_exc())
 
 # -------------------------
 #   FUNCIÓN PARA GENERAR GEOJSON
 # -------------------------
 def construir_geojson(nombre_tabla: str, tipo: str = None):
-    conn = None
+    conn = get_conn()
     try:
-        conn = get_conn()
         cur = conn.cursor()
-
         if tipo:
             cur.execute(f"""
                 SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
@@ -83,29 +71,26 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
                 FROM {nombre_tabla};
             """)
 
-        rows = cur.fetchall()
         features = []
-        for row in rows:
+        for row in cur.fetchall():
+            ogc_fid, sid, codigo, tipo_val, nivel, geom = row
             features.append({
                 "type": "Feature",
                 "properties": {
-                    "ogc_fid": row['ogc_fid'],
-                    "id": row['id'],
-                    "codigo": row['codigo'],
-                    "tipo": row['tipo'],
-                    "nivel": row['nivel']
+                    "ogc_fid": ogc_fid,
+                    "id": sid,
+                    "codigo": codigo,
+                    "tipo": tipo_val,
+                    "nivel": nivel
                 },
-                "geometry": json.loads(row['st_asgeojson'])
+                "geometry": json.loads(geom)
             })
 
         return {"type": "FeatureCollection", "features": features}
-
     except Exception as e:
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error al consultar {nombre_tabla}: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error al consultar {nombre_tabla}: {e}")
     finally:
-        if conn:
-            release_conn(conn)
+        release_conn(conn)
 
 # -------------------------
 #   ENDPOINTS POR NIVEL
@@ -127,9 +112,8 @@ def nivel3(tipo: str = None):
 # -------------------------
 @app.get("/Tipos")
 def obtener_tipos():
-    conn = None
+    conn = get_conn()
     try:
-        conn = get_conn()
         cur = conn.cursor()
         cur.execute("""
             SELECT DISTINCT tipo FROM nivel1
@@ -139,28 +123,16 @@ def obtener_tipos():
             SELECT DISTINCT tipo FROM nivel3
             ORDER BY tipo;
         """)
-        tipos = [row['tipo'] for row in cur.fetchall() if row['tipo'] is not None]
+        tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
         return {"tipos": tipos}
     except Exception as e:
-        print(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=f"Error al consultar tipos: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Error obteniendo tipos: {e}")
     finally:
-        if conn:
-            release_conn(conn)
+        release_conn(conn)
 
 # -------------------------
-#   ENDPOINT OPCIONAL: LISTA DE NIVELES DISPONIBLES
+#   ENDPOINT PARA LISTA DE NIVELES DISPONIBLES
 # -------------------------
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
-
-
-
-
-
-
-
-
-
-
