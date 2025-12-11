@@ -20,11 +20,11 @@ app.add_middleware(
 #   CONEXIÓN A POSTGIS
 # -------------------------
 conn = psycopg2.connect(
-    host="localhost",
-    database="ESCOM_APP",
-    user="postgres",
-    password="123",
-    port="5432"
+    host=os.getenv("PGHOST"),
+    database=os.getenv("PGDATABASE"),
+    user=os.getenv("PGUSER"),
+    password=os.getenv("PGPASSWORD"),
+    port=os.getenv("PGPORT")
 )
 
 # -------------------------
@@ -105,3 +105,4 @@ def obtener_tipos():
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
