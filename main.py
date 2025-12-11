@@ -21,9 +21,13 @@ app.add_middleware(
 # -------------------------
 #   CONEXIÓN A POSTGIS (Render: DATABASE_URL)
 # -------------------------
-DATABASE_URL = os.environ.get("postgresql://escom_user:XIpslvyaC6NdCcmd0BLTWsY7KLP1SXDs@dpg-d4tf32f5r7bs73ba7kj0-a.oregon-postgres.render.com/escom")
+DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise Exception("Variable de entorno DATABASE_URL no encontrada")
+
+# Reemplaza postgresql:// por postgres:// si es necesario
+if DATABASE_URL.startswith("postgresql://"):
+    DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgres://", 1)
 
 # Parsear la URL
 url = urlparse(DATABASE_URL)
@@ -32,7 +36,7 @@ conn = psycopg2.connect(
     user=url.username,
     password=url.password,
     host=url.hostname,
-    port=url.port,
+    port=url.port or 5432,
     sslmode='require'
 )
 
