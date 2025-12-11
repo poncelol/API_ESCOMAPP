@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 import json
+import os
 
 app = FastAPI()
 
@@ -105,4 +106,5 @@ def obtener_tipos():
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
 
