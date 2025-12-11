@@ -1,96 +1,65 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-import os
-import json
 import psycopg2
-from psycopg2 import pool
-from psycopg2.extras import RealDictCursor
+import json
+import os
 
 app = FastAPI()
 
 # -------------------------
-#   CORS (permite acceso desde Android o web)
+#   CORS (permite acceso desde Android o cualquier origen)
 # -------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],  # Puedes poner tu dominio de Render en producción
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 # -------------------------
-#   POOL DE CONEXIONES A POSTGRES EN RENDER
+#   CONEXIÓN A POSTGIS (Render usa DATABASE_URL)
 # -------------------------
-try:
-    db_pool = pool.SimpleConnectionPool(
-        1, 20,  # min y max conexiones
-        host=os.getenv("PGHOST"),
-        database=os.getenv("PGDATABASE"),
-        user=os.getenv("PGUSER"),
-        password=os.getenv("PGPASSWORD"),
-        port=os.getenv("PGPORT"),
-        sslmode=os.getenv("PGSSLMODE", "require"),
-        cursor_factory=RealDictCursor
-    )
-    if db_pool:
-        print("Pool de conexiones creado exitosamente")
-except Exception as e:
-    print(f"Error creando pool de conexiones: {e}")
-    raise
+DATABASE_URL = os.getenv("postgresql://escom_user:XIpslvyaC6NdCcmd0BLTWsY7KLP1SXDs@dpg-d4tf32f5r7bs73ba7kj0-a.oregon-postgres.render.com/escom")
+if not DATABASE_URL:
+    raise Exception("Variable de entorno DATABASE_URL no encontrada")
 
-# -------------------------
-#   FUNCIONES AUXILIARES
-# -------------------------
-def get_conn():
-    try:
-        return db_pool.getconn()
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error de conexión a la base de datos: {e}")
-
-def release_conn(conn):
-    if conn:
-        db_pool.putconn(conn)
+conn = psycopg2.connect(DATABASE_URL, sslmode="require")
 
 # -------------------------
 #   FUNCIÓN PARA GENERAR GEOJSON
 # -------------------------
 def construir_geojson(nombre_tabla: str, tipo: str = None):
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        if tipo:
-            cur.execute(f"""
-                SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
-                FROM {nombre_tabla}
-                WHERE tipo = %s;
-            """, (tipo,))
-        else:
-            cur.execute(f"""
-                SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
-                FROM {nombre_tabla};
-            """)
+    cur = conn.cursor()
 
-        features = []
-        for row in cur.fetchall():
-            ogc_fid, sid, codigo, tipo_val, nivel, geom = row
-            features.append({
-                "type": "Feature",
-                "properties": {
-                    "ogc_fid": ogc_fid,
-                    "id": sid,
-                    "codigo": codigo,
-                    "tipo": tipo_val,
-                    "nivel": nivel
-                },
-                "geometry": json.loads(geom)
-            })
+    if tipo:
+        cur.execute(f"""
+            SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
+            FROM {nombre_tabla}
+            WHERE tipo = %s;
+        """, (tipo,))
+    else:
+        cur.execute(f"""
+            SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
+            FROM {nombre_tabla};
+        """)
 
-        return {"type": "FeatureCollection", "features": features}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error al consultar {nombre_tabla}: {e}")
-    finally:
-        release_conn(conn)
+    features = []
+    for ogc_fid, sid, codigo, tipo, nivel, geom in cur.fetchall():
+        features.append({
+            "type": "Feature",
+            "properties": {
+                "ogc_fid": ogc_fid,
+                "id": sid,
+                "codigo": codigo,
+                "tipo": tipo,
+                "nivel": nivel
+            },
+            "geometry": json.loads(geom)
+        })
+
+    cur.close()
+    return {"type": "FeatureCollection", "features": features}
 
 # -------------------------
 #   ENDPOINTS POR NIVEL
@@ -112,27 +81,24 @@ def nivel3(tipo: str = None):
 # -------------------------
 @app.get("/Tipos")
 def obtener_tipos():
-    conn = get_conn()
-    try:
-        cur = conn.cursor()
-        cur.execute("""
-            SELECT DISTINCT tipo FROM nivel1
-            UNION
-            SELECT DISTINCT tipo FROM nivel2
-            UNION
-            SELECT DISTINCT tipo FROM nivel3
-            ORDER BY tipo;
-        """)
-        tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
-        return {"tipos": tipos}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Error obteniendo tipos: {e}")
-    finally:
-        release_conn(conn)
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT tipo FROM nivel1
+        UNION
+        SELECT DISTINCT tipo FROM nivel2
+        UNION
+        SELECT DISTINCT tipo FROM nivel3
+        ORDER BY tipo;
+    """)
+    tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
+    cur.close()
+    return {"tipos": tipos}
 
 # -------------------------
-#   ENDPOINT PARA LISTA DE NIVELES DISPONIBLES
+#   ENDPOINT OPCIONAL: LISTA DE NIVELES DISPONIBLES
 # -------------------------
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
+
