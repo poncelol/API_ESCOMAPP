@@ -1,5 +1,6 @@
 import os
 import json
+from urllib.parse import urlparse
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
@@ -18,15 +19,21 @@ app.add_middleware(
 )
 
 # -------------------------
-#   CONEXIÓN A POSTGIS (Render: variables de entorno)
+#   CONEXIÓN A POSTGIS (Render: DATABASE_URL)
 # -------------------------
+DATABASE_URL = os.environ.get("postgresql://escom_user:XIpslvyaC6NdCcmd0BLTWsY7KLP1SXDs@dpg-d4tf32f5r7bs73ba7kj0-a.oregon-postgres.render.com/escom")
+if not DATABASE_URL:
+    raise Exception("Variable de entorno DATABASE_URL no encontrada")
+
+# Parsear la URL
+url = urlparse(DATABASE_URL)
 conn = psycopg2.connect(
-    host=os.environ["PGHOST"],
-    database=os.environ["PGDATABASE"],
-    user=os.environ["PGUSER"],
-    password=os.environ["PGPASSWORD"],
-    port=os.environ["PGPORT"],
-    sslmode=os.environ.get("PGSSLMODE", "require")
+    dbname=url.path[1:],  # eliminar la barra inicial
+    user=url.username,
+    password=url.password,
+    host=url.hostname,
+    port=url.port,
+    sslmode='require'
 )
 
 # -------------------------
@@ -101,7 +108,3 @@ def obtener_tipos():
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
-
-
-
-
