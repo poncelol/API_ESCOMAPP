@@ -29,13 +29,13 @@ def get_conn():
             user=os.getenv("PGUSER"),
             password=os.getenv("PGPASSWORD"),
             port=os.getenv("PGPORT", 5432),
-            sslmode=os.getenv("PGSSLMODE", "require"),
+            sslmode="require",          # fuerza SSL
+            sslrootcert=None,           # sin certificado
             cursor_factory=RealDictCursor
         )
         return conn
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error de conexión a la base de datos: {str(e)}")
-
 # -------------------------
 # Función para construir GeoJSON desde tabla
 # -------------------------
@@ -83,6 +83,7 @@ def tipos():
 @app.get("/Niveles")
 def niveles():
     return construir_geojson("niveles")
+
 
 
 
