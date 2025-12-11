@@ -25,7 +25,8 @@ conn = psycopg2.connect(
     database=os.getenv("PGDATABASE"),
     user=os.getenv("PGUSER"),
     password=os.getenv("PGPASSWORD"),
-    port=os.getenv("PGPORT")
+    port=os.getenv("PGPORT"),
+    sslmode="require"
 )
 
 # -------------------------
@@ -106,5 +107,6 @@ def obtener_tipos():
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
 
 
