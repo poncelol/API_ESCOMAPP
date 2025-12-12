@@ -184,10 +184,41 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
         }
 
 # =========================================
+#  OBTENER EL ÚLTIMO SALÓN DONDE ESTUVO EL PROFESOR
+# =========================================
+@app.get("/ultimo_salon_profesor")
+def ultimo_salon_profesor(profesor: str):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT profesor, dia, hora_entrada, hora_salida, materia, salon
+        FROM horarios
+        WHERE profesor = %s
+        ORDER BY hora_salida DESC
+        LIMIT 1;
+    """, (profesor,))
+
+    fila = cur.fetchone()
+
+    if not fila:
+        return {"error": "No se encontró horario para este profesor"}
+
+    profesor, dia, entrada, salida, materia, salon = fila
+
+    return {
+        "profesor": profesor,
+        "dia": dia,
+        "materia": materia,
+        "hora_entrada": str(entrada),
+        "hora_salida": str(salida),
+        "salon": salon
+    }
+
+# =========================================
 #  LISTA DE NIVELES DISPONIBLES
 # =========================================
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
 
 
