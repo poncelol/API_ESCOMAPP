@@ -1,38 +1,39 @@
 import os
 import json
 from urllib.parse import urlparse
-from fastapi import FastAPI
+from io import BytesIO
+import pandas as pd
+from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 
 app = FastAPI()
 
-# -------------------------
-#   CORS (permite acceso desde Android)
-# -------------------------
+# =========================================
+#  CORS (permite acceso desde Android)
+# =========================================
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Permite cualquier origen
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -------------------------
-#   CONEXIÓN A POSTGIS (Render: DATABASE_URL)
-# -------------------------
+# =========================================
+#  CONEXIÓN A POSTGRES / POSTGIS (Render)
+# =========================================
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
-    raise Exception("Variable de entorno DATABASE_URL no encontrada")
+    raise Exception("DATABASE_URL no está definida en Render")
 
-# Reemplaza postgresql:// por postgres:// si es necesario
 if DATABASE_URL.startswith("postgresql://"):
     DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgres://", 1)
 
-# Parsear la URL
 url = urlparse(DATABASE_URL)
+
 conn = psycopg2.connect(
-    dbname=url.path[1:],  # eliminar la barra inicial
+    dbname=url.path[1:],
     user=url.username,
     password=url.password,
     host=url.hostname,
@@ -40,9 +41,9 @@ conn = psycopg2.connect(
     sslmode='require'
 )
 
-# -------------------------
-#   FUNCIÓN PARA GENERAR GEOJSON
-# -------------------------
+# =========================================
+# FUNCIÓN PARA CREAR GEOJSON
+# =========================================
 def construir_geojson(nombre_tabla: str, tipo: str = None):
     cur = conn.cursor()
 
@@ -74,9 +75,9 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
 
     return {"type": "FeatureCollection", "features": features}
 
-# -------------------------
-#   ENDPOINTS POR NIVEL
-# -------------------------
+# =========================================
+#  ENDPOINTS GEOMETRÍA POLÍGONOS
+# =========================================
 @app.get("/Nivel1")
 def nivel1(tipo: str = None):
     return construir_geojson("nivel1", tipo)
@@ -89,9 +90,9 @@ def nivel2(tipo: str = None):
 def nivel3(tipo: str = None):
     return construir_geojson("nivel3", tipo)
 
-# -------------------------
-#   ENDPOINT PARA LISTA DE TIPOS
-# -------------------------
+# =========================================
+#  OBTENER TIPOS DE POLÍGONOS
+# =========================================
 @app.get("/Tipos")
 def obtener_tipos():
     cur = conn.cursor()
@@ -106,9 +107,87 @@ def obtener_tipos():
     tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
     return {"tipos": tipos}
 
-# -------------------------
-#   ENDPOINT OPCIONAL: LISTA DE NIVELES DISPONIBLES
-# -------------------------
+# =========================================
+#  SUBIR EXCEL → PostgreSQL
+# =========================================
+@app.post("/subir_excel")
+async def subir_excel(file: UploadFile = File(...)):
+    try:
+        contenido = await file.read()
+        df = pd.read_excel(BytesIO(contenido))
+
+        columnas_requeridas = ["Profesor", "Día", "Hora Entrada", "Hora Salida", "Materia", "Salón"]
+        for col in columnas_requeridas:
+            if col not in df.columns:
+                return {"error": f"Falta la columna {col} en el Excel"}
+
+        cur = conn.cursor()
+
+        for _, row in df.iterrows():
+            cur.execute("""
+                INSERT INTO horarios (profesor, dia, hora_entrada, hora_salida, materia, salon)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, (
+                row["Profesor"],
+                row["Día"],
+                row["Hora Entrada"],
+                row["Hora Salida"],
+                row["Materia"],
+                row["Salón"]
+            ))
+
+        conn.commit()
+        return {"mensaje": "Excel importado correctamente"}
+
+    except Exception as e:
+        return {"error": str(e)}
+
+# =========================================
+#  LISTA DE PROFESORES
+# =========================================
+@app.get("/profesores")
+def obtener_profesores():
+    cur = conn.cursor()
+    cur.execute("SELECT DISTINCT profesor FROM horarios ORDER BY profesor;")
+    profesores = [row[0] for row in cur.fetchall()]
+    return {"profesores": profesores}
+
+# =========================================
+#  CONSULTAR DISPONIBILIDAD DE PROFESOR
+# =========================================
+@app.get("/horario")
+def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT materia, hora_entrada, hora_salida
+        FROM horarios
+        WHERE profesor = %s AND salon = %s AND dia = %s
+          AND %s::time BETWEEN hora_entrada AND hora_salida;
+    """, (profesor, salon, dia, hora))
+
+    fila = cur.fetchone()
+
+    if fila:
+        materia, entrada, salida = fila
+        return {
+            "disponible": True,
+            "profesor": profesor,
+            "materia": materia,
+            "entrada": str(entrada),
+            "salida": str(salida)
+        }
+    else:
+        return {
+            "disponible": False,
+            "profesor": profesor,
+            "mensaje": "No está en este salón en esta hora"
+        }
+
+# =========================================
+#  LISTA DE NIVELES DISPONIBLES
+# =========================================
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
+
