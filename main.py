@@ -107,9 +107,6 @@ def obtener_tipos():
     tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
     return {"tipos": tipos}
 
-# =========================================
-#  SUBIR EXCEL → PostgreSQL
-# =========================================
 @app.post("/subir_excel")
 async def subir_excel(file: UploadFile = File(...)):
     try:
@@ -123,6 +120,10 @@ async def subir_excel(file: UploadFile = File(...)):
 
         cur = conn.cursor()
 
+        # Vaciar la tabla antes de insertar nuevos datos
+        cur.execute("TRUNCATE TABLE horarios;")
+
+        # Insertar datos del Excel
         for _, row in df.iterrows():
             cur.execute("""
                 INSERT INTO horarios (profesor, dia, hora_entrada, hora_salida, materia, salon)
@@ -137,7 +138,7 @@ async def subir_excel(file: UploadFile = File(...)):
             ))
 
         conn.commit()
-        return {"mensaje": "Excel importado correctamente"}
+        return {"mensaje": "Excel importado correctamente y tabla sobrescrita"}
 
     except Exception as e:
         return {"error": str(e)}
@@ -219,6 +220,7 @@ def ultimo_salon_profesor(profesor: str):
 @app.get("/Niveles")
 def obtener_niveles():
     return {"niveles": [1, 2, 3]}
+
 
 
 
