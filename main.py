@@ -113,39 +113,75 @@ def obtener_tipos():
 
 @app.post("/subir_excel")
 async def subir_excel(file: UploadFile = File(...)):
+    cur = conn.cursor()
+
     try:
         contenido = await file.read()
+
         df = pd.read_excel(BytesIO(contenido))
 
-        columnas_requeridas = ["Profesor", "Día", "Hora Entrada", "Hora Salida", "Materia", "Salón"]
+        columnas_requeridas = [
+            "Profesor",
+            "Día",
+            "Hora Entrada",
+            "Hora Salida",
+            "Materia",
+            "Salón"
+        ]
+
         for col in columnas_requeridas:
             if col not in df.columns:
-                return {"error": f"Falta la columna {col} en el Excel"}
+                return {"error": f"Falta la columna {col}"}
 
-        cur = conn.cursor()
-
-        # Vaciar la tabla antes de insertar nuevos datos
+        # Vaciar tabla
         cur.execute("TRUNCATE TABLE horarios;")
 
-        # Insertar datos del Excel
         for _, row in df.iterrows():
+
+            hora_entrada = pd.to_datetime(
+                row["Hora Entrada"]
+            ).time()
+
+            hora_salida = pd.to_datetime(
+                row["Hora Salida"]
+            ).time()
+
             cur.execute("""
-                INSERT INTO horarios (profesor, dia, hora_entrada, hora_salida, materia, salon)
+                INSERT INTO horarios
+                (
+                    profesor,
+                    dia,
+                    hora_entrada,
+                    hora_salida,
+                    materia,
+                    salon
+                )
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, (
-                row["Profesor"],
-                row["Día"],
-                row["Hora Entrada"],
-                row["Hora Salida"],
-                row["Materia"],
-                row["Salón"]
+                str(row["Profesor"]),
+                str(row["Día"]),
+                hora_entrada,
+                hora_salida,
+                str(row["Materia"]),
+                str(row["Salón"])
             ))
 
         conn.commit()
-        return {"mensaje": "Excel importado correctamente y tabla sobrescrita"}
+
+        return {
+            "mensaje": "Excel importado correctamente"
+        }
 
     except Exception as e:
-        return {"error": str(e)}
+
+        conn.rollback()
+
+        return {
+            "error": str(e)
+        }
+
+    finally:
+        cur.close()
 
 # =========================================
 #  LISTA DE PROFESORES
