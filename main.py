@@ -121,6 +121,11 @@ async def subir_excel(file: UploadFile = File(...)):
         contenido = await file.read()
         df = pd.read_excel(BytesIO(contenido))
 
+        # ============================
+        # LIMPIEZA DE COLUMNAS
+        # ============================
+        df.columns = df.columns.str.strip()
+
         columnas_requeridas = [
             "Profesor",
             "Día",
@@ -133,14 +138,20 @@ async def subir_excel(file: UploadFile = File(...)):
         # Validar columnas
         for col in columnas_requeridas:
             if col not in df.columns:
-                return {"error": f"Falta la columna {col}"}
+                return {"error": f"Falta la columna: {col}"}
 
-        # Limpiar tabla
+        # ============================
+        # LIMPIAR TABLA
+        # ============================
         cur.execute("TRUNCATE TABLE horarios;")
         conn.commit()
 
         datos_validos = []
+        rechazadas = 0
 
+        # ============================
+        # PROCESAR FILAS
+        # ============================
         for _, row in df.iterrows():
             try:
                 profesor = str(row["Profesor"]).strip()
@@ -148,33 +159,46 @@ async def subir_excel(file: UploadFile = File(...)):
                 materia = str(row["Materia"]).strip()
                 salon = str(row["Salón"]).strip()
 
-                hora_entrada = pd.to_datetime(row["Hora Entrada"]).time()
-                hora_salida = pd.to_datetime(row["Hora Salida"]).time()
+                # Validación de nulos
+                if not profesor or not dia or not materia or not salon:
+                    raise ValueError("Campos obligatorios vacíos")
+
+                # Parseo seguro de horas
+                hora_entrada = pd.to_datetime(row["Hora Entrada"], errors="coerce")
+                hora_salida = pd.to_datetime(row["Hora Salida"], errors="coerce")
+
+                if pd.isna(hora_entrada) or pd.isna(hora_salida):
+                    raise ValueError("Hora inválida")
 
                 datos_validos.append((
                     profesor,
                     dia,
-                    hora_entrada,
-                    hora_salida,
+                    hora_entrada.time(),
+                    hora_salida.time(),
                     materia,
                     salon
                 ))
 
             except Exception as e:
-                print("Fila ignorada por error:", row.to_dict(), e)
+                rechazadas += 1
+                print("Fila rechazada:", row.to_dict(), "Error:", str(e))
 
-        # Inserción masiva (MUCHO más estable)
-        cur.executemany("""
-            INSERT INTO horarios
-            (profesor, dia, hora_entrada, hora_salida, materia, salon)
-            VALUES (%s, %s, %s, %s, %s, %s)
-        """, datos_validos)
+        # ============================
+        # INSERT MASIVO
+        # ============================
+        if datos_validos:
+            cur.executemany("""
+                INSERT INTO horarios
+                (profesor, dia, hora_entrada, hora_salida, materia, salon)
+                VALUES (%s, %s, %s, %s, %s, %s)
+            """, datos_validos)
 
-        conn.commit()
+            conn.commit()
 
         return {
-            "mensaje": "Excel importado correctamente",
-            "insertados": len(datos_validos)
+            "mensaje": "Excel procesado correctamente",
+            "insertados": len(datos_validos),
+            "rechazadas": rechazadas
         }
 
     except Exception as e:
