@@ -49,23 +49,24 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
 
     if tipo:
         cur.execute(f"""
-            SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
+            SELECT ogc_fid, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
             FROM {nombre_tabla}
             WHERE tipo = %s;
         """, (tipo,))
     else:
         cur.execute(f"""
-            SELECT ogc_fid, id, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
+            SELECT ogc_fid, codigo, tipo, nivel, ST_AsGeoJSON(wkb_geometry)
             FROM {nombre_tabla};
         """)
 
     features = []
-    for ogc_fid, sid, codigo, tipo, nivel, geom in cur.fetchall():
+
+    for ogc_fid, codigo, tipo, nivel, geom in cur.fetchall():
+
         features.append({
             "type": "Feature",
             "properties": {
                 "ogc_fid": ogc_fid,
-                "id": sid,
                 "codigo": codigo,
                 "tipo": tipo,
                 "nivel": nivel
@@ -73,7 +74,10 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
             "geometry": json.loads(geom)
         })
 
-    return {"type": "FeatureCollection", "features": features}
+    return {
+        "type": "FeatureCollection",
+        "features": features
+    }
 
 # =========================================
 #  ENDPOINTS GEOMETRÍA POLÍGONOS
