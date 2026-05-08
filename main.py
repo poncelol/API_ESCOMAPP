@@ -111,8 +111,13 @@ def obtener_tipos():
     tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
     return {"tipos": tipos}
 
+
+
+
+
 @app.post("/subir_excel")
 async def subir_excel(file: UploadFile = File(...)):
+
     cur = conn.cursor()
 
     try:
@@ -131,11 +136,33 @@ async def subir_excel(file: UploadFile = File(...)):
 
         for col in columnas_requeridas:
             if col not in df.columns:
-                return {"error": f"Falta la columna {col}"}
+                return {
+                    "error": f"Falta la columna {col}"
+                }
 
-        # Vaciar tabla
+        # =========================================
+        # CREAR TABLA SI NO EXISTE
+        # =========================================
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS horarios (
+                id SERIAL PRIMARY KEY,
+                profesor TEXT,
+                dia TEXT,
+                hora_entrada TIME,
+                hora_salida TIME,
+                materia TEXT,
+                salon TEXT
+            );
+        """)
+
+        # =========================================
+        # BORRAR DATOS ANTERIORES
+        # =========================================
         cur.execute("TRUNCATE TABLE horarios;")
 
+        # =========================================
+        # INSERTAR NUEVOS DATOS
+        # =========================================
         for _, row in df.iterrows():
 
             hora_entrada = pd.to_datetime(
