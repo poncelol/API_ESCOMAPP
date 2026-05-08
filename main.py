@@ -113,16 +113,12 @@ def obtener_tipos():
 
 
 
-
-
 @app.post("/subir_excel")
 async def subir_excel(file: UploadFile = File(...)):
-
     cur = conn.cursor()
 
     try:
         contenido = await file.read()
-
         df = pd.read_excel(BytesIO(contenido))
 
         columnas_requeridas = [
@@ -134,78 +130,56 @@ async def subir_excel(file: UploadFile = File(...)):
             "Salón"
         ]
 
+        # Validar columnas
         for col in columnas_requeridas:
             if col not in df.columns:
-                return {
-                    "error": f"Falta la columna {col}"
-                }
+                return {"error": f"Falta la columna {col}"}
 
-        # =========================================
-        # CREAR TABLA SI NO EXISTE
-        # =========================================
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS horarios (
-                id SERIAL PRIMARY KEY,
-                profesor TEXT,
-                dia TEXT,
-                hora_entrada TIME,
-                hora_salida TIME,
-                materia TEXT,
-                salon TEXT
-            );
-        """)
-
-        # =========================================
-        # BORRAR DATOS ANTERIORES
-        # =========================================
+        # Limpiar tabla
         cur.execute("TRUNCATE TABLE horarios;")
+        conn.commit()
 
-        # =========================================
-        # INSERTAR NUEVOS DATOS
-        # =========================================
+        datos_validos = []
+
         for _, row in df.iterrows():
+            try:
+                profesor = str(row["Profesor"]).strip()
+                dia = str(row["Día"]).strip().lower()
+                materia = str(row["Materia"]).strip()
+                salon = str(row["Salón"]).strip()
 
-            hora_entrada = pd.to_datetime(
-                row["Hora Entrada"]
-            ).time()
+                hora_entrada = pd.to_datetime(row["Hora Entrada"]).time()
+                hora_salida = pd.to_datetime(row["Hora Salida"]).time()
 
-            hora_salida = pd.to_datetime(
-                row["Hora Salida"]
-            ).time()
-
-            cur.execute("""
-                INSERT INTO horarios
-                (
+                datos_validos.append((
                     profesor,
                     dia,
                     hora_entrada,
                     hora_salida,
                     materia,
                     salon
-                )
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, (
-                str(row["Profesor"]),
-                str(row["Día"]),
-                hora_entrada,
-                hora_salida,
-                str(row["Materia"]),
-                str(row["Salón"])
-            ))
+                ))
+
+            except Exception as e:
+                print("Fila ignorada por error:", row.to_dict(), e)
+
+        # Inserción masiva (MUCHO más estable)
+        cur.executemany("""
+            INSERT INTO horarios
+            (profesor, dia, hora_entrada, hora_salida, materia, salon)
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, datos_validos)
 
         conn.commit()
 
         return {
-            "mensaje": "Excel importado correctamente"
+            "mensaje": "Excel importado correctamente",
+            "insertados": len(datos_validos)
         }
 
     except Exception as e:
-
         conn.rollback()
-
-        return {
-            "error": str(e)
-        }
+        return {"error": str(e)}
 
     finally:
         cur.close()
