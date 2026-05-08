@@ -246,10 +246,13 @@ async def subir_excel(file: UploadFile = File(...)):
 # =========================================
 @app.get("/profesores")
 def obtener_profesores():
-    cur = conn.cursor()
-    cur.execute("SELECT DISTINCT profesor FROM horarios ORDER BY profesor;")
-    profesores = [row[0] for row in cur.fetchall()]
-    return {"profesores": profesores}
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT profesor FROM horarios ORDER BY profesor;")
+        profesores = [row[0] for row in cur.fetchall()]
+        return {"profesores": profesores}
+    except Exception as e:
+        return {"error": str(e)}
 
 # =========================================
 #  CONSULTAR DISPONIBILIDAD DE PROFESOR
