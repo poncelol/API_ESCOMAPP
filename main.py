@@ -38,15 +38,13 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise Exception("DATABASE_URL no está definida")
 
-# compatibilidad render
-if DATABASE_URL.startswith("postgresql://"):
+# compatibilidad SQLAlchemy
+if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace(
-        "postgresql://",
         "postgres://",
+        "postgresql://",
         1
     )
-
-url = urlparse(DATABASE_URL)
 
 # =========================================
 # CONEXIÓN PSYCOPG2
