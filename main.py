@@ -46,6 +46,9 @@ if DATABASE_URL.startswith("postgres://"):
         1
     )
 
+# PARSE URL
+url = urlparse(DATABASE_URL)
+
 # =========================================
 # CONEXIÓN PSYCOPG2
 # =========================================
