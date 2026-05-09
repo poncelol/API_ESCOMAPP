@@ -31,14 +31,14 @@ app.add_middleware(
 )
 
 # =========================================
-# DATABASE URL
+# CONEXIÓN A POSTGRES / POSTGIS (Render)
 # =========================================
-DATABASE_URL = os.environ.get("DATABASE_URL")
+DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
 
 if not DATABASE_URL:
-    raise Exception("DATABASE_URL no está definida")
+    raise Exception("DATABASE_URL no está definida en Render")
 
-# compatibilidad SQLAlchemy
+# SQLAlchemy necesita postgresql://
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace(
         "postgres://",
@@ -46,7 +46,6 @@ if DATABASE_URL.startswith("postgres://"):
         1
     )
 
-# PARSE URL
 url = urlparse(DATABASE_URL)
 
 # =========================================
@@ -62,9 +61,12 @@ conn = psycopg2.connect(
 )
 
 # =========================================
-# SQLALCHEMY ENGINE (GeoPandas)
+# SQLALCHEMY ENGINE
 # =========================================
-engine = create_engine(DATABASE_URL)
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True
+)
 
 # =========================================
 # FUNCIÓN GEOJSON
