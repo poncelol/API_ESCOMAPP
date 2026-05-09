@@ -1,6 +1,12 @@
 fastapi
 uvicorn
 psycopg2-binary
-python-multipart
 pandas
 openpyxl
+python-multipart
+geopandas
+shapely
+fiona
+pyogrio
+sqlalchemy
+geoalchemy2
