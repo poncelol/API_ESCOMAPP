@@ -9,6 +9,7 @@ import geopandas as gpd
 
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
 
 import psycopg2
 
@@ -18,6 +19,14 @@ from sqlalchemy import create_engine
 # FASTAPI
 # =========================================
 app = FastAPI()
+
+# =========================================
+# GZIP (IMPORTANTE PARA GEOJSON)
+# =========================================
+app.add_middleware(
+    GZipMiddleware,
+    minimum_size=1000
+)
 
 # =========================================
 # CORS
@@ -31,15 +40,21 @@ app.add_middleware(
 )
 
 # =========================================
-# CONEXIÓN A POSTGRES / POSTGIS (Render)
+# DATABASE URL
 # =========================================
-DATABASE_URL = os.environ.get("DATABASE_URL", "").strip()
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    ""
+).strip()
 
 if not DATABASE_URL:
-    raise Exception("DATABASE_URL no está definida en Render")
+    raise Exception(
+        "DATABASE_URL no está definida"
+    )
 
-# SQLAlchemy necesita postgresql://
+# SQLAlchemy requiere postgresql://
 if DATABASE_URL.startswith("postgres://"):
+
     DATABASE_URL = DATABASE_URL.replace(
         "postgres://",
         "postgresql://",
@@ -49,37 +64,41 @@ if DATABASE_URL.startswith("postgres://"):
 url = urlparse(DATABASE_URL)
 
 # =========================================
-# CONEXIÓN PSYCOPG2
+# FUNCIÓN CONEXIÓN
 # =========================================
-conn = psycopg2.connect(
-    dbname=url.path[1:],
-    user=url.username,
-    password=url.password,
-    host=url.hostname,
-    port=url.port or 5432,
-    sslmode="require"
-)
+def get_connection():
+
+    return psycopg2.connect(
+        dbname=url.path[1:],
+        user=url.username,
+        password=url.password,
+        host=url.hostname,
+        port=url.port or 5432,
+        sslmode="require"
+    )
 
 # =========================================
 # SQLALCHEMY ENGINE
 # =========================================
 engine = create_engine(
     DATABASE_URL,
-    pool_pre_ping=True
+    pool_pre_ping=True,
+    pool_recycle=300
 )
 
 # =========================================
 # FUNCIÓN GEOJSON
 # =========================================
-def construir_geojson(nombre_tabla: str, tipo: str = None):
+def construir_geojson(
+    nombre_tabla: str,
+    tipo: str = None
+):
 
+    conn = get_connection()
     cur = conn.cursor()
 
     try:
 
-        # =====================================
-        # VALIDAR TABLA
-        # =====================================
         tablas_validas = [
             "nivel1",
             "nivel2",
@@ -87,6 +106,7 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
         ]
 
         if nombre_tabla not in tablas_validas:
+
             return {
                 "error": "Tabla no permitida"
             }
@@ -106,7 +126,9 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
 
                 FROM {nombre_tabla}
 
-                WHERE tipo = %s;
+                WHERE tipo = %s
+
+                LIMIT 1000;
             """, (tipo,))
 
         else:
@@ -119,11 +141,13 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
                     nivel,
                     ST_AsGeoJSON(wkb_geometry)
 
-                FROM {nombre_tabla};
+                FROM {nombre_tabla}
+
+                LIMIT 1000;
             """)
 
         # =====================================
-        # CREAR FEATURES
+        # FEATURES
         # =====================================
         features = []
 
@@ -154,22 +178,36 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
         }
 
     finally:
+
         cur.close()
+        conn.close()
 
 # =========================================
 # ENDPOINTS MAPAS
 # =========================================
 @app.get("/Nivel1")
 def nivel1(tipo: str = None):
-    return construir_geojson("nivel1", tipo)
+
+    return construir_geojson(
+        "nivel1",
+        tipo
+    )
 
 @app.get("/Nivel2")
 def nivel2(tipo: str = None):
-    return construir_geojson("nivel2", tipo)
+
+    return construir_geojson(
+        "nivel2",
+        tipo
+    )
 
 @app.get("/Nivel3")
 def nivel3(tipo: str = None):
-    return construir_geojson("nivel3", tipo)
+
+    return construir_geojson(
+        "nivel3",
+        tipo
+    )
 
 # =========================================
 # TIPOS
@@ -177,6 +215,7 @@ def nivel3(tipo: str = None):
 @app.get("/Tipos")
 def obtener_tipos():
 
+    conn = get_connection()
     cur = conn.cursor()
 
     try:
@@ -214,7 +253,9 @@ def obtener_tipos():
         }
 
     finally:
+
         cur.close()
+        conn.close()
 
 # =========================================
 # SUBIR GPKG
@@ -239,6 +280,9 @@ async def subir_gpkg(
 
     temp_dir = tempfile.mkdtemp()
 
+    conn = get_connection()
+    cur = conn.cursor()
+
     try:
 
         # =====================================
@@ -257,30 +301,33 @@ async def subir_gpkg(
         # =====================================
         # LEER GPKG
         # =====================================
-        gdf = gpd.read_file(ruta_archivo)
+        gdf = gpd.read_file(
+            ruta_archivo
+        )
 
         if gdf.empty:
 
             return {
-                "error": "El archivo está vacío"
+                "error": "Archivo vacío"
             }
 
         # =====================================
         # CRS
         # =====================================
         if gdf.crs:
-            gdf = gdf.to_crs(epsg=4326)
+
+            gdf = gdf.to_crs(
+                epsg=4326
+            )
 
         # =====================================
-        # NORMALIZAR COLUMNAS
+        # COLUMNAS
         # =====================================
-        columnas = [c.lower() for c in gdf.columns]
+        gdf.columns = [
+            c.lower()
+            for c in gdf.columns
+        ]
 
-        gdf.columns = columnas
-
-        # =====================================
-        # CREAR COLUMNAS SI NO EXISTEN
-        # =====================================
         if "codigo" not in gdf.columns:
             gdf["codigo"] = None
 
@@ -299,7 +346,7 @@ async def subir_gpkg(
                 gdf["nivel"] = 3
 
         # =====================================
-        # RENOMBRAR GEOMETRÍA
+        # GEOMETRÍA
         # =====================================
         gdf = gdf.rename_geometry(
             "wkb_geometry"
@@ -317,10 +364,8 @@ async def subir_gpkg(
         )
 
         # =====================================
-        # CREAR ÍNDICE ESPACIAL
+        # ÍNDICE ESPACIAL
         # =====================================
-        cur = conn.cursor()
-
         cur.execute(f"""
             CREATE INDEX IF NOT EXISTS
             idx_{tabla}_geom
@@ -332,32 +377,44 @@ async def subir_gpkg(
 
         conn.commit()
 
-        cur.close()
-
         return {
 
-            "mensaje": "GeoPackage subido correctamente",
+            "mensaje":
+                "GeoPackage subido correctamente",
 
-            "tabla": tabla,
+            "tabla":
+                tabla,
 
-            "registros": len(gdf),
+            "registros":
+                len(gdf),
 
-            "columnas": list(gdf.columns)
+            "columnas":
+                list(gdf.columns)
 
         }
 
     except Exception as e:
 
+        conn.rollback()
+
         return {
             "error": str(e)
         }
+
+    finally:
+
+        cur.close()
+        conn.close()
 
 # =========================================
 # SUBIR EXCEL
 # =========================================
 @app.post("/subir_excel")
-async def subir_excel(file: UploadFile = File(...)):
+async def subir_excel(
+    file: UploadFile = File(...)
+):
 
+    conn = get_connection()
     cur = conn.cursor()
 
     try:
@@ -396,16 +453,17 @@ async def subir_excel(file: UploadFile = File(...)):
         # =====================================
         # LIMPIAR TABLA
         # =====================================
-        cur.execute("TRUNCATE TABLE horarios;")
+        cur.execute(
+            "TRUNCATE TABLE horarios;"
+        )
 
         conn.commit()
 
         datos_validos = []
-
         errores = []
 
         # =====================================
-        # VALIDAR FILAS
+        # VALIDAR
         # =====================================
         for index, row in df.iterrows():
 
@@ -429,32 +487,18 @@ async def subir_excel(file: UploadFile = File(...)):
                     row["Salón"]
                 ).strip()
 
-                # =============================
-                # VALIDAR
-                # =============================
-                if not profesor:
-                    fila_error.append("Profesor vacío")
-
-                if not dia:
-                    fila_error.append("Día vacío")
-
-                if not materia:
-                    fila_error.append("Materia vacía")
-
-                if not salon:
-                    fila_error.append("Salón vacío")
-
-                # =============================
-                # HORAS
-                # =============================
                 hora_entrada = pd.to_datetime(
-                    str(row["Hora Entrada"]).strip(),
+                    str(
+                        row["Hora Entrada"]
+                    ).strip(),
                     format="%H:%M",
                     errors="coerce"
                 )
 
                 hora_salida = pd.to_datetime(
-                    str(row["Hora Salida"]).strip(),
+                    str(
+                        row["Hora Salida"]
+                    ).strip(),
                     format="%H:%M",
                     errors="coerce"
                 )
@@ -462,53 +506,54 @@ async def subir_excel(file: UploadFile = File(...)):
                 if pd.isna(hora_entrada):
 
                     fila_error.append(
-                        f"Hora Entrada inválida: {row['Hora Entrada']}"
+                        "Hora Entrada inválida"
                     )
 
                 if pd.isna(hora_salida):
 
                     fila_error.append(
-                        f"Hora Salida inválida: {row['Hora Salida']}"
+                        "Hora Salida inválida"
                     )
 
-                # =============================
-                # ERRORES
-                # =============================
                 if fila_error:
 
                     errores.append({
 
-                        "fila": index + 2,
+                        "fila":
+                            index + 2,
 
-                        "datos": row.to_dict(),
-
-                        "errores": fila_error
+                        "errores":
+                            fila_error
 
                     })
 
                     continue
 
-                # =============================
-                # FILA VÁLIDA
-                # =============================
                 datos_validos.append((
+
                     profesor,
+
                     dia,
+
                     hora_entrada.time(),
+
                     hora_salida.time(),
+
                     materia,
+
                     salon
+
                 ))
 
             except Exception as e:
 
                 errores.append({
 
-                    "fila": index + 2,
+                    "fila":
+                        index + 2,
 
-                    "datos": row.to_dict(),
-
-                    "errores": [str(e)]
+                    "errores":
+                        [str(e)]
 
                 })
 
@@ -529,7 +574,10 @@ async def subir_excel(file: UploadFile = File(...)):
                     salon
                 )
 
-                VALUES (%s,%s,%s,%s,%s,%s)
+                VALUES
+                (
+                    %s,%s,%s,%s,%s,%s
+                )
 
             """, datos_validos)
 
@@ -537,13 +585,17 @@ async def subir_excel(file: UploadFile = File(...)):
 
         return {
 
-            "mensaje": "Importación finalizada",
+            "mensaje":
+                "Importación finalizada",
 
-            "insertados": len(datos_validos),
+            "insertados":
+                len(datos_validos),
 
-            "errores": len(errores),
+            "errores":
+                len(errores),
 
-            "detalle_errores": errores
+            "detalle_errores":
+                errores
 
         }
 
@@ -553,14 +605,18 @@ async def subir_excel(file: UploadFile = File(...)):
 
         return {
 
-            "error": "Error importando Excel",
+            "error":
+                "Error importando Excel",
 
-            "detalle": str(e)
+            "detalle":
+                str(e)
 
         }
 
     finally:
+
         cur.close()
+        conn.close()
 
 # =========================================
 # PROFESORES
@@ -568,14 +624,19 @@ async def subir_excel(file: UploadFile = File(...)):
 @app.get("/profesores")
 def obtener_profesores():
 
+    conn = get_connection()
     cur = conn.cursor()
 
     try:
 
         cur.execute("""
+
             SELECT DISTINCT profesor
+
             FROM horarios
+
             ORDER BY profesor;
+
         """)
 
         profesores = [
@@ -594,10 +655,12 @@ def obtener_profesores():
         }
 
     finally:
+
         cur.close()
+        conn.close()
 
 # =========================================
-# CONSULTAR HORARIO
+# HORARIO
 # =========================================
 @app.get("/horario")
 def consultar_horario(
@@ -607,6 +670,7 @@ def consultar_horario(
     hora: str
 ):
 
+    conn = get_connection()
     cur = conn.cursor()
 
     try:
@@ -629,10 +693,12 @@ def consultar_horario(
             AND hora_salida;
 
         """, (
+
             profesor,
             salon,
             dia,
             hora
+
         ))
 
         fila = cur.fetchone()
@@ -643,27 +709,32 @@ def consultar_horario(
 
             return {
 
-                "disponible": True,
+                "disponible":
+                    True,
 
-                "profesor": profesor,
+                "profesor":
+                    profesor,
 
-                "materia": materia,
+                "materia":
+                    materia,
 
-                "entrada": str(entrada),
+                "entrada":
+                    str(entrada),
 
-                "salida": str(salida)
-
-            }
-
-        else:
-
-            return {
-
-                "disponible": False,
-
-                "mensaje": "No encontrado"
+                "salida":
+                    str(salida)
 
             }
+
+        return {
+
+            "disponible":
+                False,
+
+            "mensaje":
+                "No encontrado"
+
+        }
 
     except Exception as e:
 
@@ -672,14 +743,19 @@ def consultar_horario(
         }
 
     finally:
+
         cur.close()
+        conn.close()
 
 # =========================================
 # ÚLTIMO SALÓN
 # =========================================
 @app.get("/ultimo_salon_profesor")
-def ultimo_salon_profesor(profesor: str):
+def ultimo_salon_profesor(
+    profesor: str
+):
 
+    conn = get_connection()
     cur = conn.cursor()
 
     try:
@@ -709,24 +785,31 @@ def ultimo_salon_profesor(profesor: str):
         if not fila:
 
             return {
-                "error": "Profesor no encontrado"
+                "error":
+                    "Profesor no encontrado"
             }
 
         profesor, dia, entrada, salida, materia, salon = fila
 
         return {
 
-            "profesor": profesor,
+            "profesor":
+                profesor,
 
-            "dia": dia,
+            "dia":
+                dia,
 
-            "materia": materia,
+            "materia":
+                materia,
 
-            "hora_entrada": str(entrada),
+            "hora_entrada":
+                str(entrada),
 
-            "hora_salida": str(salida),
+            "hora_salida":
+                str(salida),
 
-            "salon": salon
+            "salon":
+                salon
 
         }
 
@@ -737,7 +820,9 @@ def ultimo_salon_profesor(profesor: str):
         }
 
     finally:
+
         cur.close()
+        conn.close()
 
 # =========================================
 # NIVELES
