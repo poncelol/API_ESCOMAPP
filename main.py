@@ -73,7 +73,27 @@ def construir_geojson(nombre_tabla: str, tipo: str = None) -> dict:
     return {"type": "FeatureCollection", "features": features}
 
 
+def construir_geojson_nivel0() -> dict:
+    """Nivel 0: tabla sin columnas codigo/tipo/nivel, solo geometría de fondo."""
+    cur = conn.cursor()
+    cur.execute("SELECT ogc_fid, ST_AsGeoJSON(wkb_geometry) FROM nivel0;")
+    features = [
+        {
+            "type": "Feature",
+            "properties": {"ogc_fid": ogc_fid},
+            "geometry": json.loads(geom),
+        }
+        for ogc_fid, geom in cur.fetchall()
+    ]
+    return {"type": "FeatureCollection", "features": features}
+
+
 # ── Endpoints: geometría ──────────────────────────────────────────────────────
+
+@app.get("/Nivel0")
+def nivel0():
+    return construir_geojson_nivel0()
+
 
 @app.get("/Nivel1")
 def nivel1(tipo: str = None):
