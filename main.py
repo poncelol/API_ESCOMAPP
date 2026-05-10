@@ -82,6 +82,11 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
 # =========================================
 #  ENDPOINTS GEOMETRÍA POLÍGONOS
 # =========================================
+
+@app.get("/Nivel0")
+def nivel0(tipo: str = None):
+    return construir_geojson("nivel0", tipo)
+
 @app.get("/Nivel1")
 def nivel1(tipo: str = None):
     return construir_geojson("nivel1", tipo)
@@ -101,6 +106,8 @@ def nivel3(tipo: str = None):
 def obtener_tipos():
     cur = conn.cursor()
     cur.execute("""
+        SELECT DISTINCT tipo FROM nivel0
+        UNION
         SELECT DISTINCT tipo FROM nivel1
         UNION
         SELECT DISTINCT tipo FROM nivel2
@@ -108,7 +115,9 @@ def obtener_tipos():
         SELECT DISTINCT tipo FROM nivel3
         ORDER BY tipo;
     """)
+    
     tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
+
     return {"tipos": tipos}
 
 
@@ -320,7 +329,7 @@ def ultimo_salon_profesor(profesor: str):
 # =========================================
 @app.get("/Niveles")
 def obtener_niveles():
-    return {"niveles": [1, 2, 3]}
+    return {"niveles": [0, 1, 2, 3]}
 
 
 
