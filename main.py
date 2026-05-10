@@ -236,6 +236,8 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
 @app.get("/ultimo_salon_profesor")
 def ultimo_salon_profesor(profesor: str):
     cur = conn.cursor()
+
+    # 1. Obtener el último salón del profesor
     cur.execute("""
         SELECT profesor, dia, hora_entrada, hora_salida, materia, salon
         FROM horarios
@@ -248,12 +250,26 @@ def ultimo_salon_profesor(profesor: str):
     if not fila:
         return {"error": "No se encontró horario para este profesor"}
 
-    profesor, dia, entrada, salida, materia, salon = fila
+    profesor_db, dia, entrada, salida, materia, salon = fila
+
+    # 2. Buscar en qué nivel (piso) está ese salón consultando las tablas de geometría
+    #    Esto es 100 % confiable porque usa los mismos datos que el mapa.
+    nivel = None
+    for n in [1, 2, 3]:
+        cur.execute(
+            f"SELECT 1 FROM nivel{n} WHERE codigo = %s LIMIT 1;",
+            (salon,)
+        )
+        if cur.fetchone():
+            nivel = n
+            break
+
     return {
-        "profesor": profesor,
+        "profesor": profesor_db,
         "dia": dia,
         "materia": materia,
         "hora_entrada": str(entrada),
         "hora_salida": str(salida),
         "salon": salon,
+        "nivel": nivel,   # 1, 2 o 3  (None si el salón no está en ninguna tabla de geometría)
     }
