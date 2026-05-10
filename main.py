@@ -9,6 +9,9 @@ import psycopg2
 
 app = FastAPI()
 
+# =========================================
+#  CORS (permite acceso desde Android)
+# =========================================
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,6 +20,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# =========================================
+#  CONEXIÓN A POSTGRES / POSTGIS (Render)
+# =========================================
 DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise Exception("DATABASE_URL no está definida en Render")
@@ -36,7 +42,7 @@ conn = psycopg2.connect(
 )
 
 # =========================================
-# FUNCIÓN PARA CREAR GEOJSON (Nivel 1, 2, 3)
+# FUNCIÓN PARA CREAR GEOJSON
 # =========================================
 def construir_geojson(nombre_tabla: str, tipo: str = None):
     cur = conn.cursor()
@@ -54,49 +60,32 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
         """)
 
     features = []
-    for ogc_fid, codigo, tipo_val, nivel, geom in cur.fetchall():
+
+    for ogc_fid, codigo, tipo, nivel, geom in cur.fetchall():
+
         features.append({
             "type": "Feature",
             "properties": {
                 "ogc_fid": ogc_fid,
                 "codigo": codigo,
-                "tipo": tipo_val,
+                "tipo": tipo,
                 "nivel": nivel
             },
             "geometry": json.loads(geom)
         })
 
-    return {"type": "FeatureCollection", "features": features}
-
-
-# =========================================
-# FUNCIÓN PARA NIVEL 0 (solo tiene ogc_fid y wkb_geometry)
-# =========================================
-def construir_geojson_nivel0():
-    cur = conn.cursor()
-    cur.execute("""
-        SELECT ogc_fid, ST_AsGeoJSON(wkb_geometry)
-        FROM nivel0;
-    """)
-
-    features = []
-    for ogc_fid, geom in cur.fetchall():
-        features.append({
-            "type": "Feature",
-            "properties": {"ogc_fid": ogc_fid},
-            "geometry": json.loads(geom)
-        })
-
-    return {"type": "FeatureCollection", "features": features}
-
+    return {
+        "type": "FeatureCollection",
+        "features": features
+    }
 
 # =========================================
 #  ENDPOINTS GEOMETRÍA POLÍGONOS
 # =========================================
 
 @app.get("/Nivel0")
-def nivel0():
-    return construir_geojson_nivel0()
+def nivel0(tipo: str = None):
+    return construir_geojson("nivel0", tipo)
 
 @app.get("/Nivel1")
 def nivel1(tipo: str = None):
@@ -110,7 +99,6 @@ def nivel2(tipo: str = None):
 def nivel3(tipo: str = None):
     return construir_geojson("nivel3", tipo)
 
-
 # =========================================
 #  OBTENER TIPOS DE POLÍGONOS
 # =========================================
@@ -118,6 +106,8 @@ def nivel3(tipo: str = None):
 def obtener_tipos():
     cur = conn.cursor()
     cur.execute("""
+        SELECT DISTINCT tipo FROM nivel0
+        UNION
         SELECT DISTINCT tipo FROM nivel1
         UNION
         SELECT DISTINCT tipo FROM nivel2
@@ -125,13 +115,13 @@ def obtener_tipos():
         SELECT DISTINCT tipo FROM nivel3
         ORDER BY tipo;
     """)
+    
     tipos = [row[0] for row in cur.fetchall() if row[0] is not None]
+
     return {"tipos": tipos}
 
 
-# =========================================
-#  SUBIR EXCEL DE HORARIOS
-# =========================================
+
 @app.post("/subir_excel")
 async def subir_excel(file: UploadFile = File(...)):
     cur = conn.cursor()
@@ -139,52 +129,108 @@ async def subir_excel(file: UploadFile = File(...)):
     try:
         contenido = await file.read()
         df = pd.read_excel(BytesIO(contenido), engine="openpyxl")
+
+        # =========================
+        # LIMPIEZA DE COLUMNAS
+        # =========================
         df.columns = df.columns.str.strip()
 
-        columnas_requeridas = ["Profesor", "Día", "Hora Entrada", "Hora Salida", "Materia", "Salón"]
+        columnas_requeridas = [
+            "Profesor",
+            "Día",
+            "Hora Entrada",
+            "Hora Salida",
+            "Materia",
+            "Salón"
+        ]
+
         for col in columnas_requeridas:
             if col not in df.columns:
                 return {"error": f"Falta la columna: {col}"}
 
+        # limpiar tabla
         cur.execute("TRUNCATE TABLE horarios;")
         conn.commit()
 
         datos_validos = []
         errores = []
 
+        # =========================
+        # VALIDACIÓN POR FILA
+        # =========================
         for index, row in df.iterrows():
             fila_error = []
+
             try:
                 profesor = str(row["Profesor"]).strip()
                 dia = str(row["Día"]).strip().lower()
                 materia = str(row["Materia"]).strip()
                 salon = str(row["Salón"]).strip()
 
-                if not profesor: fila_error.append("Profesor vacío")
-                if not dia: fila_error.append("Día vacío")
-                if not materia: fila_error.append("Materia vacía")
-                if not salon: fila_error.append("Salón vacío")
+                # validar vacíos
+                if not profesor:
+                    fila_error.append("Profesor vacío")
+                if not dia:
+                    fila_error.append("Día vacío")
+                if not materia:
+                    fila_error.append("Materia vacía")
+                if not salon:
+                    fila_error.append("Salón vacío")
 
-                hora_entrada = pd.to_datetime(str(row["Hora Entrada"]).strip(), format="%H:%M", errors="coerce")
-                hora_salida = pd.to_datetime(str(row["Hora Salida"]).strip(), format="%H:%M", errors="coerce")
+                # parseo de horas
+                hora_entrada = pd.to_datetime(
+                    str(row["Hora Entrada"]).strip(),
+                    format="%H:%M",
+                    errors="coerce"
+                )
 
-                if pd.isna(hora_entrada): fila_error.append(f"Hora Entrada inválida: {row['Hora Entrada']}")
-                if pd.isna(hora_salida): fila_error.append(f"Hora Salida inválida: {row['Hora Salida']}")
+                hora_salida = pd.to_datetime(
+                    str(row["Hora Salida"]).strip(),
+                    format="%H:%M",
+                    errors="coerce"
+                )
 
+                if pd.isna(hora_entrada):
+                    fila_error.append(f"Hora Entrada inválida: {row['Hora Entrada']}")
+                if pd.isna(hora_salida):
+                    fila_error.append(f"Hora Salida inválida: {row['Hora Salida']}")
+
+                # si hay errores → se guarda
                 if fila_error:
-                    errores.append({"fila": index + 2, "datos": row.to_dict(), "errores": fila_error})
+                    errores.append({
+                        "fila": index + 2,  # +2 por Excel (header + index base 0)
+                        "datos": row.to_dict(),
+                        "errores": fila_error
+                    })
                     continue
 
-                datos_validos.append((profesor, dia, hora_entrada.time(), hora_salida.time(), materia, salon))
+                # fila válida
+                datos_validos.append((
+                    profesor,
+                    dia,
+                    hora_entrada.time(),
+                    hora_salida.time(),
+                    materia,
+                    salon
+                ))
 
             except Exception as e:
-                errores.append({"fila": index + 2, "datos": row.to_dict(), "errores": [str(e)]})
+                errores.append({
+                    "fila": index + 2,
+                    "datos": row.to_dict(),
+                    "errores": [str(e)]
+                })
 
+        # =========================
+        # INSERT
+        # =========================
         if datos_validos:
             cur.executemany("""
-                INSERT INTO horarios (profesor, dia, hora_entrada, hora_salida, materia, salon)
+                INSERT INTO horarios
+                (profesor, dia, hora_entrada, hora_salida, materia, salon)
                 VALUES (%s, %s, %s, %s, %s, %s)
             """, datos_validos)
+
             conn.commit()
 
         return {
@@ -196,10 +242,13 @@ async def subir_excel(file: UploadFile = File(...)):
 
     except Exception as e:
         conn.rollback()
-        return {"error": "Error general en importación", "detalle": str(e)}
+        return {
+            "error": "Error general en importación",
+            "detalle": str(e)
+        }
+
     finally:
         cur.close()
-
 
 # =========================================
 #  LISTA DE PROFESORES
@@ -213,7 +262,6 @@ def obtener_profesores():
         return {"profesores": profesores}
     except Exception as e:
         return {"error": str(e)}
-
 
 # =========================================
 #  CONSULTAR DISPONIBILIDAD DE PROFESOR
@@ -246,10 +294,9 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
             "mensaje": "No está en este salón en esta hora"
         }
 
-
 # =========================================
 #  OBTENER EL SALÓN ACTUAL/ÚLTIMO DEL PROFESOR
-#  Ahora busca el salón activo en este momento (día y hora actual),
+#  Busca el salón activo en este momento (día y hora actual en México),
 #  y si no hay, devuelve el último registrado.
 #  Incluye el campo "nivel" para que Android sepa en qué piso buscarlo.
 # =========================================
@@ -305,9 +352,8 @@ def ultimo_salon_profesor(profesor: str):
         "hora_entrada": str(entrada),
         "hora_salida": str(salida),
         "salon": salon,
-        "nivel": nivel        # <-- CAMPO NUEVO: Android lo usa para saltar al piso correcto
+        "nivel": nivel        # Android lo usa para saltar al piso correcto
     }
-
 
 # =========================================
 #  LISTA DE NIVELES DISPONIBLES
