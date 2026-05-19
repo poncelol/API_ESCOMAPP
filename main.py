@@ -289,3 +289,9 @@ def ultimo_salon_profesor(profesor: str):
         "salon": salon,
         "nivel": nivel,
     }
+
+@app.get("/test-sentry")
+def test_sentry():
+    division = 1 / 0   # error intencional
+    return {"ok": True}
+
