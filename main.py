@@ -216,7 +216,9 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
         WHERE profesor = %s
           AND salon = %s
           AND dia = %s
-          AND %s::time BETWEEN hora_entrada AND hora_salida;
+          AND %s::time BETWEEN hora_entrada AND hora_salida
+        ORDER BY hora_entrada DESC
+        LIMIT 1;
     """, (profesor, salon, dia.lower(), hora))  # ← dia.lower() corrige el bug de mayúsculas
 
     fila = cur.fetchone()
@@ -250,6 +252,7 @@ def ultimo_salon_profesor(profesor: str):
         WHERE profesor = %s
           AND dia = %s
           AND %s::time BETWEEN hora_entrada AND hora_salida
+        ORDER BY hora_entrada DESC
         LIMIT 1;
     """, (profesor, dia_actual, hora_actual))
     fila = cur.fetchone()
