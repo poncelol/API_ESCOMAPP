@@ -234,17 +234,65 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
 
 @app.get("/ultimo_salon_profesor")
 def ultimo_salon_profesor(profesor: str):
+    from datetime import datetime
+
     cur = conn.cursor()
 
+    ahora      = datetime.now()
+    hora_actual = ahora.time()
+    dias_es    = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    dia_actual = dias_es[ahora.weekday()]
+
+    # 1. Clase activa ahora mismo
     cur.execute("""
         SELECT profesor, dia, hora_entrada, hora_salida, materia, salon
         FROM horarios
         WHERE profesor = %s
-        ORDER BY hora_salida DESC
+          AND dia = %s
+          AND %s::time BETWEEN hora_entrada AND hora_salida
         LIMIT 1;
-    """, (profesor,))
-
+    """, (profesor, dia_actual, hora_actual))
     fila = cur.fetchone()
+
+    # 2. Próxima clase de hoy
+    if not fila:
+        cur.execute("""
+            SELECT profesor, dia, hora_entrada, hora_salida, materia, salon
+            FROM horarios
+            WHERE profesor = %s
+              AND dia = %s
+              AND hora_entrada > %s::time
+            ORDER BY hora_entrada ASC
+            LIMIT 1;
+        """, (profesor, dia_actual, hora_actual))
+        fila = cur.fetchone()
+
+    # 3. Próxima clase en los días restantes de la semana
+    if not fila:
+        for dia in dias_es[ahora.weekday() + 1:]:
+            cur.execute("""
+                SELECT profesor, dia, hora_entrada, hora_salida, materia, salon
+                FROM horarios
+                WHERE profesor = %s
+                  AND dia = %s
+                ORDER BY hora_entrada ASC
+                LIMIT 1;
+            """, (profesor, dia))
+            fila = cur.fetchone()
+            if fila:
+                break
+
+    # 4. Fallback original: cualquier clase ordenada por hora_salida DESC
+    if not fila:
+        cur.execute("""
+            SELECT profesor, dia, hora_entrada, hora_salida, materia, salon
+            FROM horarios
+            WHERE profesor = %s
+            ORDER BY hora_salida DESC
+            LIMIT 1;
+        """, (profesor,))
+        fila = cur.fetchone()
+
     if not fila:
         return {"error": "No se encontró horario para este profesor"}
 
@@ -269,4 +317,3 @@ def ultimo_salon_profesor(profesor: str):
         "salon": salon,
         "nivel": nivel,
     }
-
