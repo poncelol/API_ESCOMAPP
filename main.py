@@ -237,18 +237,15 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
 @app.get("/ultimo_salon_profesor")
 def ultimo_salon_profesor(profesor: str):
     from datetime import datetime
-    import pytz
 
     cur = conn.cursor()
 
-    tz_mexico  = pytz.timezone("America/Mexico_City")
-    ahora      = datetime.now(tz_mexico)
-    # Extraer hora como string sin timezone para evitar problemas con PostgreSQL
+    ahora       = datetime.now()  # TZ=America/Mexico_City en Render
     hora_actual = ahora.strftime("%H:%M:%S")
-    dias_es    = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
-    dia_actual = dias_es[ahora.weekday()]
+    dias_es     = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
+    dia_actual  = dias_es[ahora.weekday()]
 
-    print(f"[DEBUG] profesor={profesor} | dia_actual={dia_actual} | hora_actual={hora_actual} | hora_mexico={ahora.strftime('%H:%M')}")
+    print(f"[DEBUG] profesor={profesor} | dia_actual={dia_actual} | hora_actual={hora_actual}")
 
     # 1. Clase activa ahora mismo
     cur.execute("""
