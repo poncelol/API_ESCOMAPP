@@ -10,4 +10,4 @@ fiona
 pyogrio
 sqlalchemy
 geoalchemy2
-sentry-sdk[fastapi]
+pytz
