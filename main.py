@@ -237,10 +237,11 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
 @app.get("/ultimo_salon_profesor")
 def ultimo_salon_profesor(profesor: str):
     from datetime import datetime
+    from zoneinfo import ZoneInfo
 
     cur = conn.cursor()
 
-    ahora       = datetime.now()  # TZ=America/Mexico_City en Render
+    ahora       = datetime.now(ZoneInfo("America/Mexico_City"))
     hora_actual = ahora.strftime("%H:%M:%S")
     dias_es     = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     dia_actual  = dias_es[ahora.weekday()]
