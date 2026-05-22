@@ -247,6 +247,8 @@ def ultimo_salon_profesor(profesor: str):
     dias_es    = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     dia_actual = dias_es[ahora.weekday()]
 
+    print(f"[DEBUG] profesor={profesor} | dia_actual={dia_actual} | hora_actual={hora_actual}")
+
     # 1. Clase activa ahora mismo
     cur.execute("""
         SELECT profesor, dia, hora_entrada, hora_salida, materia, salon
@@ -258,6 +260,7 @@ def ultimo_salon_profesor(profesor: str):
         LIMIT 1;
     """, (profesor, dia_actual, hora_actual))
     fila = cur.fetchone()
+    print(f"[DEBUG] paso1 (activa ahora): {fila}")
 
     # 2. Próxima clase de hoy
     if not fila:
@@ -271,6 +274,7 @@ def ultimo_salon_profesor(profesor: str):
             LIMIT 1;
         """, (profesor, dia_actual, hora_actual))
         fila = cur.fetchone()
+        print(f"[DEBUG] paso2 (proxima hoy): {fila}")
 
     # 3. Próxima clase en los días restantes de la semana
     if not fila:
@@ -284,6 +288,7 @@ def ultimo_salon_profesor(profesor: str):
                 LIMIT 1;
             """, (profesor, dia))
             fila = cur.fetchone()
+            print(f"[DEBUG] paso3 dia={dia}: {fila}")
             if fila:
                 break
 
@@ -297,6 +302,7 @@ def ultimo_salon_profesor(profesor: str):
             LIMIT 1;
         """, (profesor,))
         fila = cur.fetchone()
+        print(f"[DEBUG] paso4 (fallback): {fila}")
 
     if not fila:
         return {"error": "No se encontró horario para este profesor"}
