@@ -243,11 +243,12 @@ def ultimo_salon_profesor(profesor: str):
 
     tz_mexico  = pytz.timezone("America/Mexico_City")
     ahora      = datetime.now(tz_mexico)
-    hora_actual = ahora.time()
+    # Extraer hora como string sin timezone para evitar problemas con PostgreSQL
+    hora_actual = ahora.strftime("%H:%M:%S")
     dias_es    = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
     dia_actual = dias_es[ahora.weekday()]
 
-    print(f"[DEBUG] profesor={profesor} | dia_actual={dia_actual} | hora_actual={hora_actual}")
+    print(f"[DEBUG] profesor={profesor} | dia_actual={dia_actual} | hora_actual={hora_actual} | hora_mexico={ahora.strftime('%H:%M')}")
 
     # 1. Clase activa ahora mismo
     cur.execute("""
