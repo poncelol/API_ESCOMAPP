@@ -8,24 +8,6 @@ import psycopg2
 from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
-import sentry_sdk
-from sentry_sdk.integrations.fastapi import FastApiIntegration
-from sentry_sdk.integrations.starlette import StarletteIntegration
-
-# ── Sentry ────────────────────────────────────────────────────────────────────
-
-sentry_sdk.init(
-    dsn="https://58591f0755034a75b3a814badcacfa84@o4511414713516032.ingest.us.sentry.io/4511414725115904",
-    send_default_pii=True,                  # captura IP y headers del celular
-    traces_sample_rate=1.0,                 # registra el 100% de las transacciones
-    profiles_sample_rate=1.0,              # perfila rendimiento de cada endpoint
-    integrations=[
-        StarletteIntegration(transaction_style="endpoint"),
-        FastApiIntegration(transaction_style="endpoint"),
-    ],
-    environment=os.environ.get("RENDER_SERVICE_NAME", "local"),  # "local" si no está en Render
-)
-
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI()
@@ -210,7 +192,6 @@ async def subir_excel(file: UploadFile = File(...)):
 
     except Exception as e:
         conn.rollback()
-        sentry_sdk.capture_exception(e)   # ← reporta el error a Sentry manualmente
         return {"error": "Error general en importación", "detalle": str(e)}
     finally:
         cur.close()
@@ -223,7 +204,6 @@ def obtener_profesores():
         cur.execute("SELECT DISTINCT profesor FROM horarios ORDER BY profesor;")
         return {"profesores": [row[0] for row in cur.fetchall()]}
     except Exception as e:
-        sentry_sdk.capture_exception(e)
         return {"error": str(e)}
 
 
@@ -237,7 +217,7 @@ def consultar_horario(profesor: str, salon: str, dia: str, hora: str):
           AND salon = %s
           AND dia = %s
           AND %s::time BETWEEN hora_entrada AND hora_salida;
-    """, (profesor, salon, dia, hora))
+    """, (profesor, salon, dia.lower(), hora))  # ← dia.lower() corrige el bug de mayúsculas
 
     fila = cur.fetchone()
     if fila:
@@ -289,9 +269,4 @@ def ultimo_salon_profesor(profesor: str):
         "salon": salon,
         "nivel": nivel,
     }
-
-@app.get("/test-sentry")
-def test_sentry():
-    division = 1 / 0   # error intencional
-    return {"ok": True}
 
