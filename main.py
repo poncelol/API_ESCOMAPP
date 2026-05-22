@@ -3,8 +3,6 @@ import os
 import unicodedata
 from urllib.parse import urlparse
 from io import BytesIO
-from datetime import datetime
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 import psycopg2
@@ -12,7 +10,7 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
 
 # ─────────────────────────────────────────────────────────────
-# APP
+# App
 # ─────────────────────────────────────────────────────────────
 
 app = FastAPI()
@@ -26,7 +24,7 @@ app.add_middleware(
 )
 
 # ─────────────────────────────────────────────────────────────
-# BASE DE DATOS
+# Base de datos
 # ─────────────────────────────────────────────────────────────
 
 DATABASE_URL = os.environ.get("DATABASE_URL")
@@ -52,20 +50,24 @@ conn = psycopg2.connect(
 )
 
 # ─────────────────────────────────────────────────────────────
-# UTILIDADES
+# Utilidades
 # ─────────────────────────────────────────────────────────────
 
-def normalizar_texto(texto):
-    texto = str(texto).strip().lower()
+def normalizar_texto(texto: str) -> str:
 
-    texto = unicodedata.normalize("NFD", texto)
+    texto = texto.lower().strip()
 
-    texto = "".join(
-        c for c in texto
-        if unicodedata.category(c) != "Mn"
+    texto = ''.join(
+        c for c in unicodedata.normalize('NFD', texto)
+        if unicodedata.category(c) != 'Mn'
     )
 
-    return texto
+    equivalencias = {
+        "miercoles": "miércoles",
+        "sabado": "sábado"
+    }
+
+    return equivalencias.get(texto, texto)
 
 
 def construir_geojson(nombre_tabla: str, tipo: str = None):
@@ -73,6 +75,7 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
     cur = conn.cursor()
 
     if tipo:
+
         cur.execute(
             f"""
             SELECT
@@ -86,7 +89,9 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
             """,
             (tipo,)
         )
+
     else:
+
         cur.execute(
             f"""
             SELECT
@@ -107,11 +112,11 @@ def construir_geojson(nombre_tabla: str, tipo: str = None):
             "type": "Feature",
             "properties": {
                 "ogc_fid": ogc_fid,
-                "codigo": codigo,
+                "codigo": str(codigo),
                 "tipo": tipo,
-                "nivel": nivel,
+                "nivel": nivel
             },
-            "geometry": json.loads(geom),
+            "geometry": json.loads(geom)
         })
 
     cur.close()
@@ -142,7 +147,7 @@ def construir_geojson_nivel0():
             "properties": {
                 "ogc_fid": ogc_fid
             },
-            "geometry": json.loads(geom),
+            "geometry": json.loads(geom)
         })
 
     cur.close()
@@ -153,7 +158,7 @@ def construir_geojson_nivel0():
     }
 
 # ─────────────────────────────────────────────────────────────
-# ENDPOINTS GEOMETRÍA
+# Geometría
 # ─────────────────────────────────────────────────────────────
 
 @app.get("/Nivel0")
@@ -206,7 +211,7 @@ def obtener_tipos():
     return {"tipos": tipos}
 
 # ─────────────────────────────────────────────────────────────
-# SUBIR EXCEL
+# Excel horarios
 # ─────────────────────────────────────────────────────────────
 
 @app.post("/subir_excel")
@@ -225,7 +230,7 @@ async def subir_excel(file: UploadFile = File(...)):
 
         df.columns = df.columns.str.strip()
 
-        columnas_requeridas = [
+        columnas = [
             "Profesor",
             "Día",
             "Hora Entrada",
@@ -234,129 +239,72 @@ async def subir_excel(file: UploadFile = File(...)):
             "Salón"
         ]
 
-        for col in columnas_requeridas:
+        for col in columnas:
 
             if col not in df.columns:
-                return {
-                    "error": f"Falta la columna: {col}"
-                }
+                return {"error": f"Falta columna: {col}"}
 
         cur.execute("TRUNCATE TABLE horarios;")
         conn.commit()
 
-        datos_validos = []
-        errores = []
+        datos = []
 
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
 
-            fila_error = []
+            profesor = str(row["Profesor"]).strip()
 
-            try:
+            dia = normalizar_texto(
+                str(row["Día"]).strip()
+            )
 
-                profesor = str(row["Profesor"]).strip()
+            materia = str(row["Materia"]).strip()
 
-                dia = normalizar_texto(
-                    row["Día"]
-                )
+            salon = str(row["Salón"]).strip()
 
-                materia = str(
-                    row["Materia"]
-                ).strip()
+            entrada = pd.to_datetime(
+                str(row["Hora Entrada"]).strip(),
+                format="%H:%M",
+                errors="coerce"
+            )
 
-                salon = str(
-                    row["Salón"]
-                ).strip()
+            salida = pd.to_datetime(
+                str(row["Hora Salida"]).strip(),
+                format="%H:%M",
+                errors="coerce"
+            )
 
-                hora_entrada = pd.to_datetime(
-                    str(row["Hora Entrada"]).strip(),
-                    format="%H:%M",
-                    errors="coerce"
-                )
+            if (
+                pd.isna(entrada)
+                or pd.isna(salida)
+            ):
+                continue
 
-                hora_salida = pd.to_datetime(
-                    str(row["Hora Salida"]).strip(),
-                    format="%H:%M",
-                    errors="coerce"
-                )
+            datos.append((
+                profesor,
+                dia,
+                entrada.time(),
+                salida.time(),
+                materia,
+                salon
+            ))
 
-                if not profesor:
-                    fila_error.append(
-                        "Profesor vacío"
-                    )
+        cur.executemany("""
+            INSERT INTO horarios (
+                profesor,
+                dia,
+                hora_entrada,
+                hora_salida,
+                materia,
+                salon
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+        """, datos)
 
-                if not dia:
-                    fila_error.append(
-                        "Día vacío"
-                    )
-
-                if not materia:
-                    fila_error.append(
-                        "Materia vacía"
-                    )
-
-                if not salon:
-                    fila_error.append(
-                        "Salón vacío"
-                    )
-
-                if pd.isna(hora_entrada):
-                    fila_error.append(
-                        f"Hora Entrada inválida: {row['Hora Entrada']}"
-                    )
-
-                if pd.isna(hora_salida):
-                    fila_error.append(
-                        f"Hora Salida inválida: {row['Hora Salida']}"
-                    )
-
-                if fila_error:
-
-                    errores.append({
-                        "fila": index + 2,
-                        "datos": row.to_dict(),
-                        "errores": fila_error
-                    })
-
-                    continue
-
-                datos_validos.append((
-                    profesor,
-                    dia,
-                    hora_entrada.time(),
-                    hora_salida.time(),
-                    materia,
-                    salon
-                ))
-
-            except Exception as e:
-
-                errores.append({
-                    "fila": index + 2,
-                    "datos": row.to_dict(),
-                    "errores": [str(e)]
-                })
-
-        if datos_validos:
-
-            cur.executemany("""
-                INSERT INTO horarios (
-                    profesor,
-                    dia,
-                    hora_entrada,
-                    hora_salida,
-                    materia,
-                    salon
-                )
-                VALUES (%s, %s, %s, %s, %s, %s)
-            """, datos_validos)
-
-            conn.commit()
+        conn.commit()
 
         return {
-            "mensaje": "Importación finalizada",
-            "insertados": len(datos_validos),
-            "errores": len(errores),
-            "detalle_errores": errores,
+            "mensaje": "Horarios cargados",
+            "insertados": len(datos)
         }
 
     except Exception as e:
@@ -371,41 +319,31 @@ async def subir_excel(file: UploadFile = File(...)):
         cur.close()
 
 # ─────────────────────────────────────────────────────────────
-# PROFESORES
+# Profesores
 # ─────────────────────────────────────────────────────────────
 
 @app.get("/profesores")
 def obtener_profesores():
 
-    try:
+    cur = conn.cursor()
 
-        cur = conn.cursor()
+    cur.execute("""
+        SELECT DISTINCT profesor
+        FROM horarios
+        ORDER BY profesor;
+    """)
 
-        cur.execute("""
-            SELECT DISTINCT profesor
-            FROM horarios
-            ORDER BY profesor;
-        """)
+    profesores = [
+        row[0]
+        for row in cur.fetchall()
+    ]
 
-        profesores = [
-            row[0]
-            for row in cur.fetchall()
-        ]
+    cur.close()
 
-        cur.close()
-
-        return {
-            "profesores": profesores
-        }
-
-    except Exception as e:
-
-        return {
-            "error": str(e)
-        }
+    return {"profesores": profesores}
 
 # ─────────────────────────────────────────────────────────────
-# CONSULTAR HORARIO
+# Horario actual
 # ─────────────────────────────────────────────────────────────
 
 @app.get("/horario")
@@ -416,13 +354,12 @@ def consultar_horario(
     hora: str
 ):
 
-    cur = conn.cursor()
-
-    dia_normalizado = normalizar_texto(dia)
+    dia = normalizar_texto(dia)
 
     print(f"[DEBUG] dia recibido: {dia}")
-    print(f"[DEBUG] dia normalizado: {dia_normalizado}")
     print(f"[DEBUG] hora: {hora}")
+
+    cur = conn.cursor()
 
     cur.execute("""
         SELECT
@@ -433,15 +370,13 @@ def consultar_horario(
         WHERE profesor = %s
           AND salon = %s
           AND dia = %s
-          AND %s::time >= hora_entrada
-          AND %s::time < hora_salida
-        ORDER BY hora_entrada DESC
+          AND %s::time BETWEEN hora_entrada AND hora_salida
+        ORDER BY hora_entrada ASC
         LIMIT 1;
     """, (
         profesor,
         salon,
-        dia_normalizado,
-        hora,
+        dia,
         hora
     ))
 
@@ -458,50 +393,48 @@ def consultar_horario(
             "profesor": profesor,
             "materia": materia,
             "entrada": str(entrada),
-            "salida": str(salida),
+            "salida": str(salida)
         }
 
     return {
         "disponible": False,
-        "mensaje": "No encontrado"
+        "profesor": profesor,
+        "mensaje": "No está en este salón"
     }
 
 # ─────────────────────────────────────────────────────────────
-# ÚLTIMO SALÓN PROFESOR
+# Último salón profesor
 # ─────────────────────────────────────────────────────────────
 
 @app.get("/ultimo_salon_profesor")
-def ultimo_salon_profesor(profesor: str):
+def ultimo_salon_profesor(
+    profesor: str,
+    dia: str,
+    hora: str
+):
 
     cur = conn.cursor()
 
-    ahora = datetime.now(
-        ZoneInfo("America/Mexico_City")
-    )
-
-    hora_actual = ahora.strftime("%H:%M:%S")
+    dia_actual = normalizar_texto(dia)
+    hora_actual = hora
 
     dias_es = [
         "lunes",
         "martes",
-        "miercoles",
+        "miércoles",
         "jueves",
         "viernes",
-        "sabado",
+        "sábado",
         "domingo"
-    ]
-
-    dia_actual = dias_es[
-        ahora.weekday()
     ]
 
     print(f"[DEBUG] profesor={profesor}")
     print(f"[DEBUG] dia_actual={dia_actual}")
     print(f"[DEBUG] hora_actual={hora_actual}")
 
-    # ─────────────────────────────
-    # 1. Clase actual
-    # ─────────────────────────────
+    # ─────────────────────────────────────────
+    # Clase actual
+    # ─────────────────────────────────────────
 
     cur.execute("""
         SELECT
@@ -514,14 +447,12 @@ def ultimo_salon_profesor(profesor: str):
         FROM horarios
         WHERE profesor = %s
           AND dia = %s
-          AND %s::time >= hora_entrada
-          AND %s::time < hora_salida
-        ORDER BY hora_entrada DESC
+          AND %s::time BETWEEN hora_entrada AND hora_salida
+        ORDER BY hora_entrada ASC
         LIMIT 1;
     """, (
         profesor,
         dia_actual,
-        hora_actual,
         hora_actual
     ))
 
@@ -529,9 +460,9 @@ def ultimo_salon_profesor(profesor: str):
 
     print(f"[DEBUG] paso1: {fila}")
 
-    # ─────────────────────────────
-    # 2. Próxima clase hoy
-    # ─────────────────────────────
+    # ─────────────────────────────────────────
+    # Próxima clase del día
+    # ─────────────────────────────────────────
 
     if not fila:
 
@@ -559,15 +490,15 @@ def ultimo_salon_profesor(profesor: str):
 
         print(f"[DEBUG] paso2: {fila}")
 
-    # ─────────────────────────────
-    # 3. Siguientes días
-    # ─────────────────────────────
+    # ─────────────────────────────────────────
+    # Buscar próximos días
+    # ─────────────────────────────────────────
 
-    if not fila:
+    if not fila and dia_actual in dias_es:
 
-        for dia in dias_es[
-            ahora.weekday() + 1:
-        ]:
+        indice = dias_es.index(dia_actual)
+
+        for siguiente in dias_es[indice + 1:]:
 
             cur.execute("""
                 SELECT
@@ -584,19 +515,19 @@ def ultimo_salon_profesor(profesor: str):
                 LIMIT 1;
             """, (
                 profesor,
-                dia
+                siguiente
             ))
 
             fila = cur.fetchone()
 
-            print(f"[DEBUG] buscando {dia}: {fila}")
+            print(f"[DEBUG] buscando {siguiente}: {fila}")
 
             if fila:
                 break
 
-    # ─────────────────────────────
-    # 4. Fallback
-    # ─────────────────────────────
+    # ─────────────────────────────────────────
+    # Fallback semanal
+    # ─────────────────────────────────────────
 
     if not fila:
 
@@ -610,7 +541,17 @@ def ultimo_salon_profesor(profesor: str):
                 salon
             FROM horarios
             WHERE profesor = %s
-            ORDER BY hora_salida DESC
+            ORDER BY
+                CASE dia
+                    WHEN 'lunes' THEN 1
+                    WHEN 'martes' THEN 2
+                    WHEN 'miércoles' THEN 3
+                    WHEN 'jueves' THEN 4
+                    WHEN 'viernes' THEN 5
+                    WHEN 'sábado' THEN 6
+                    WHEN 'domingo' THEN 7
+                END,
+                hora_entrada ASC
             LIMIT 1;
         """, (profesor,))
 
@@ -618,49 +559,44 @@ def ultimo_salon_profesor(profesor: str):
 
         print(f"[DEBUG] fallback: {fila}")
 
-    cur.close()
-
     if not fila:
 
         return {
-            "error": "No encontrado"
+            "error": "No se encontró horario"
         }
 
-    profesor_db, dia, entrada, salida, materia, salon = fila
+    profesor_db, dia_db, entrada, salida, materia, salon = fila
 
-    # ─────────────────────────────
-    # Buscar nivel
-    # ─────────────────────────────
+    # ─────────────────────────────────────────
+    # Buscar nivel real
+    # ─────────────────────────────────────────
 
     nivel = None
 
-    cur2 = conn.cursor()
-
     for n in [1, 2, 3]:
 
-        cur2.execute(
+        cur.execute(
             f"""
             SELECT 1
             FROM nivel{n}
-            WHERE codigo = %s
+            WHERE codigo::text = %s
             LIMIT 1;
             """,
-            (salon,)
+            (str(salon),)
         )
 
-        if cur2.fetchone():
-
+        if cur.fetchone():
             nivel = n
             break
 
-    cur2.close()
+    cur.close()
 
     return {
         "profesor": profesor_db,
-        "dia": dia,
+        "dia": dia_db,
         "materia": materia,
         "hora_entrada": str(entrada),
         "hora_salida": str(salida),
-        "salon": salon,
-        "nivel": nivel,
+        "salon": str(salon),
+        "nivel": nivel
     }
